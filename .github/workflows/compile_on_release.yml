@@ -1,0 +1,82 @@
+name: Compile on Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - board: nodemcuv2
+            platform: espressif8266
+          - board: lolin32
+            platform: espressif32
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade platformio
+
+      - name: Build Firmware
+        run: |
+          # Create platformio.ini
+          cat <<EOF > platformio.ini
+          [env:build]
+          platform = ${{ matrix.platform }}
+          board = ${{ matrix.board }}
+          framework = arduino
+          lib_deps =
+            file://.
+            https://github.com/bblanchon/ArduinoJson
+            https://github.com/knolleary/pubsubclient
+          EOF
+
+          # Move example to src for pio run
+          mkdir -p src
+          cp examples/Basic/Basic.ino src/main.cpp
+
+          # Run build
+          pio run
+
+      - name: Rename and Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WiFiManager-${{ matrix.board }}-firmware
+          path: .pio/build/build/firmware.bin
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Move and Rename binaries for release
+        run: |
+          mv WiFiManager-nodemcuv2-firmware/firmware.bin WiFiManager-ESP8266.bin
+          mv WiFiManager-lolin32-firmware/firmware.bin WiFiManager-ESP32.bin
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            WiFiManager-ESP8266.bin
+            WiFiManager-ESP32.bin
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
